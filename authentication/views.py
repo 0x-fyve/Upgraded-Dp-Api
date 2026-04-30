@@ -6,7 +6,7 @@ from django.http import JsonResponse
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 import json
-
+import requests
 from .services import exchange_code_for_token, get_github_user, create_or_update_user
 from .tokens import create_tokens, verify_token, blacklist_token
 
@@ -33,34 +33,76 @@ def github_login(request):
 
     return redirect(url)
 
+import requests
+import json
+from django.http import JsonResponse
+from django.conf import settings
+from users.models import User
+from authentication.tokens import create_tokens
+
+
 def github_callback(request):
+    # GitHub sends code via GET
     code = request.GET.get("code")
-    
-    stored_state = request.session.get("oauth_state")
-    incoming_state = request.GET.get("state")
 
-    if not stored_state or stored_state != incoming_state:
-        return JsonResponse(
-            {"status": "error", "message": "Invalid state"},
-            status=400
-        )
+    # CLI sends verifier via POST body
+    body = json.loads(request.body or "{}")
+    code_verifier = body.get("code_verifier")
 
-    code_verifier = request.session.get("code_verifier")
+    if not code or not code_verifier:
+        return JsonResponse({
+            "status": "error",
+            "message": "Missing code or code_verifier"
+        }, status=400)
 
-    github_token = exchange_code_for_token(code, code_verifier)
+    # Exchange code for GitHub access token
+    token_res = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.GITHUB_CLIENT_ID,
+            "client_secret": settings.GITHUB_CLIENT_SECRET,
+            "code": code,
+            "code_verifier": code_verifier,
+        }
+    ).json()
 
-    if not github_token:
-        return JsonResponse({"status": "error", "message": "GitHub auth failed"}, status=502)
+    github_access_token = token_res.get("access_token")
 
-    user_data = get_github_user(github_token)
-    user = create_or_update_user(user_data)
+    if not github_access_token:
+        return JsonResponse({
+            "status": "error",
+            "message": "GitHub token exchange failed"
+        }, status=400)
 
+    # Get user info
+    user_data = requests.get(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {github_access_token}"}
+    ).json()
+
+    github_id = user_data["id"]
+    username = user_data["login"]
+    email = user_data.get("email")
+
+    # Create or update user
+    user, _ = User.objects.get_or_create(
+        github_id=github_id,
+        defaults={
+            "username": username,
+            "email": email,
+            "role": "analyst"
+        }
+    )
+
+    # Issue YOUR system tokens
     access, refresh = create_tokens(user)
 
     return JsonResponse({
         "status": "success",
         "access_token": access,
-        "refresh_token": refresh
+        "refresh_token": refresh,
+        "username": user.username
     })
 
 
@@ -157,28 +199,3 @@ def logout(request):
     blacklist_token(refresh)
 
     return JsonResponse({"status": "success"})
-
-@csrf_exempt
-def github_exchange(request):
-    if request.method != "POST":
-        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
-
-    body = json.loads(request.body)
-    code = body.get("code")
-    code_verifier = body.get("code_verifier")
-
-    if not code or not code_verifier:
-        return JsonResponse({"status": "error", "message": "Missing params"}, status=400)
-
-    # 1. exchange code with GitHub
-    # 2. get user info
-    # 3. create/update user
-    # 4. issue tokens
-
-    access, refresh = create_tokens(user)
-
-    return JsonResponse({
-        "status": "success",
-        "access_token": access,
-        "refresh_token": refresh
-    })

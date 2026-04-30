@@ -41,16 +41,28 @@ INSTALLED_APPS = [
     'Dp_Api',
     'rest_framework',
     'corsheaders',
-    'seed'
+    'seed',
+    'authentication',
+    'users'
 ]
+
+GITHUB_CLIENT_ID = "Ov23li6DF3E96i8ZqUCW"
+GITHUB_CLIENT_SECRET = "9b4d356ad833a4436651239531d454a886dd8b8a"
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
+
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+
+    # REQUIRED FOR DJANGO ADMIN
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+
+    # YOUR CUSTOM AUTH (SAFE NOW)
+    'core.middleware.AuthMiddleware',
+
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
